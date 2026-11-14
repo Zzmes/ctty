@@ -41,3 +41,12 @@ func TestThemeRegistration(t *testing.T) {
 		t.Fatalf("expected catppuccin index 1, got %d", idx)
 	}
 }
+
+func TestNeriloDesignTokens(t *testing.T) {
+    if GetTheme("nerilo").ID != "nerilo" {
+        t.Fatal("NERILO theme must be selectable")
+    }
+    if DefaultTheme.Name != "NERILO Slate Blue" {
+        t.Fatalf("unexpected default theme: %s", DefaultTheme.Name)
+    }
+}
