@@ -301,9 +301,9 @@ func (m Model) renderListView() string {
 
 	// Add title (compact on small terminal heights < 20 lines)
 	if m.height < 20 {
-		components = append(components, m.styles.Header.Render("🚀 ctty"))
+		components = append(components, m.styles.Header.Render("◇ NERILO  /  Remote Workspace"))
 	} else {
-		components = append(components, m.styles.Header.Render(asciiTitle))
+		components = append(components, m.styles.Header.Render("◇ NERILO  ·  Remote Connection Workspace"))
 	}
 
 	// Add update notification if available (between title and search)
@@ -447,6 +447,11 @@ func (m Model) renderListView() string {
 		return renderConfirmModal(m.width, m.height, m.renderBatchModal())
 	}
 
+	// NERILO's spacious dashboard is opt-in by available terminal geometry.
+	// All existing dialogs, modals, and narrow-terminal layouts remain intact.
+	if m.width >= 104 && m.height >= 22 {
+		return m.renderNeriloDashboard()
+	}
 	return mainView
 }
 
