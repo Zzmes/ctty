@@ -1610,15 +1610,15 @@ func (m *sftpFormModel) View() string {
 		return m.renderInfoView()
 	}
 
-	localStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	remoteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("36"))
+	localStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#91B7F8"))
+	remoteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8ED8BB"))
 	if m.focusLocal {
 		localStyle = localStyle.Bold(true)
 	} else {
 		remoteStyle = remoteStyle.Bold(true)
 	}
 
-	header := m.styles.Header.Render(i18n.T("sftp.title_remote", m.hostName))
+	header := m.styles.Header.Render("◈ NERILO  /  SFTP Explorer  /  " + m.hostName)
 
 	var paths string
 	var panes string
@@ -1658,7 +1658,7 @@ func (m *sftpFormModel) View() string {
 
 	var extras []string
 	if m.loading && m.client != nil {
-		progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("36"))
+		progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8ED8BB"))
 		extras = append(extras, progressStyle.Render(fmt.Sprintf("  ⏳ %s...", m.statusMsg)))
 	} else if m.statusActive() {
 		extras = append(extras, renderStatusToast(m.statusMsg))
