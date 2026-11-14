@@ -9,195 +9,184 @@ import (
     "github.com/zsuroy/ctty/internal/config"
 )
 
-// NERILO's dashboard is a presentation-only layer over the existing SSH list
-// model. Keyboard handling, search, sorting, and connection commands stay
-// untouched. The classic list remains the fallback for smaller terminals.
+// The dashboard is strictly a view over the existing model. All shortcuts,
+// SSH connections, searches and dialogs are handled by the original state machine.
 func (m Model) renderNeriloDashboard() string {
-    const sidebarWidth = 20
-    const inspectorWidth = 33
-    contentWidth := m.width - sidebarWidth - inspectorWidth
-    if contentWidth < 40 {
-        return m.styles.App.Render(m.renderTableView())
+    const sidebarWidth, inspectorWidth = 23, 39
+    w := min(m.width-4, 148)
+    h := min(m.height-4, 43)
+    if w < 108 || h < 22 {
+        return m.styles.App.Render(m.styles.Header.Render("◈ NERILO / Connections") + "\n" + m.renderTableView())
     }
+    p := newNeriloPalette()
+    centerWidth := w-sidebarWidth-inspectorWidth
+    bodyHeight := h-5
 
-    bg := lipgloss.Color("#0B111B")
-    sidebarBg := lipgloss.Color("#101723")
-    panelBg := lipgloss.Color("#121B29")
-    border := lipgloss.Color("#344052")
-    fg := lipgloss.Color("#C5D0E2")
-    muted := lipgloss.Color("#7E90A9")
-    accent := lipgloss.Color("#91B7F8")
-    purple := lipgloss.Color("#C2B2FF")
-
-    title := lipgloss.NewStyle().Foreground(accent).Bold(true)
-    dim := lipgloss.NewStyle().Foreground(muted)
-    strong := lipgloss.NewStyle().Foreground(fg).Bold(true)
-    strip := lipgloss.NewStyle().Foreground(fg).Background(panelBg).Padding(0, 1).
-        Width(m.width).Render(title.Render("◇ NERILO") + dim.Render("  /  Remote Workspace"))
-    tabs := lipgloss.NewStyle().Foreground(muted).Background(bg).Padding(0, 1).
-        Width(m.width).Render(title.Render("SSH") + "   Serial   Telnet   FTP   WebDAV   S3")
-    availableHeight := m.height - 5
-    if availableHeight < 12 {
-        availableHeight = 12
-    }
-
-    // Sidebar: intentionally static navigation labels. Protocol switching
-    // keeps its established keyboard bindings and is not simulated by this UI.
-    sidebarLines := []string{
-        title.Render(" N  nerilo"),
-        "",
-        dim.Render(" WORKSPACE"),
-        title.Render(" ▸ SSH Hosts"),
-        "   Serial",
-        "   Telnet",
-        "   FTP / WebDAV",
-        "   S3 Storage",
-        "",
-        dim.Render(" CONNECTIONS"),
-        fmt.Sprintf("   Hosts   %d", len(m.hosts)),
-        "",
-        dim.Render(" SHORTCUTS"),
-        "   /   Search",
-        "   ↵   Connect",
-        "   ?   Help",
-    }
-    sidebar := lipgloss.NewStyle().Width(sidebarWidth-1).Height(availableHeight).
-        Background(sidebarBg).Foreground(fg).
-        Border(lipgloss.NormalBorder(), false, true, false, false).
-        BorderForeground(border).Render(strings.Join(sidebarLines, "\n"))
-
-    hosts := m.filteredHosts
-    if hosts == nil {
-        hosts = m.hosts
-    }
-    cursor := m.table.Cursor()
-    if cursor < 0 {
-        cursor = 0
-    }
-    if len(hosts) > 0 && cursor >= len(hosts) {
-        cursor = len(hosts) - 1
-    }
-
-    listWidth := contentWidth - 4
-    if listWidth < 12 {
-        listWidth = 12
-    }
-    centerLines := []string{
-        strong.Render(" Connections") + " " + dim.Render(fmt.Sprintf("(%d)", len(hosts))),
-        dim.Render(" Manage your remote environments"),
-        "",
-        title.Render(" ⌕ ") + ansi.Truncate(m.searchInput.Value(), listWidth-6, "") +
-            dim.Render("  / search"),
-        "",
-        dim.Render(" HOSTS"),
-    }
-    maxRows := availableHeight - len(centerLines) - 2
-    if maxRows < 1 {
-        maxRows = 1
-    }
-    start := 0
-    if cursor >= maxRows {
-        start = cursor - maxRows + 1
-    }
-    if start > len(hosts)-maxRows {
-        start = len(hosts)-maxRows
-    }
-    if start < 0 {
-        start = 0
-    }
-    end := start + maxRows
-    if end > len(hosts) {
-        end = len(hosts)
-    }
-    for i := start; i < end; i++ {
-        host := hosts[i]
-        indicator := m.getPingStatusIndicator(host.Name)
-        name := ansi.Truncate(host.Name, listWidth-9, "…")
-        row := fmt.Sprintf(" %s %s", indicator, name)
-        if i == cursor {
-            row = lipgloss.NewStyle().Background(lipgloss.Color("#263751")).
-                Foreground(lipgloss.Color("#E3EAFA")).Bold(true).
-                Width(listWidth).Render("▸" + ansi.Truncate(row, listWidth-1, ""))
-        } else {
-            row = ansi.Truncate(row, listWidth, "")
-        }
-        centerLines = append(centerLines, row)
-    }
-    if len(hosts) == 0 {
-        centerLines = append(centerLines, dim.Render(" No matching hosts"))
-    }
-    if m.showingError && m.errorMessage != "" {
-        centerLines = append(centerLines, lipgloss.NewStyle().
-            Foreground(lipgloss.Color("#F28B9D")).
-            Render(ansi.Truncate(m.errorMessage, listWidth, "…")))
-    } else if m.statusActive() {
-        centerLines = append(centerLines, dim.Render(ansi.Truncate(m.statusMessage, listWidth, "…")))
-    }
-    center := lipgloss.NewStyle().Width(contentWidth-2).Height(availableHeight).
-        Padding(0, 1).Background(bg).Render(strings.Join(centerLines, "\n"))
-
-    // Inspector uses only existing configuration data: it never fabricates
-    // online status, latency, or server CPU/memory statistics.
-    detail := []string{dim.Render(" CONNECTION DETAILS"), ""}
-    if len(hosts) > 0 {
-        h := hosts[cursor]
-        detail = append(detail,
-            title.Render(" "+ansi.Truncate(h.Name, inspectorWidth-4, "…")),
-            "",
-            dim.Render(" SSH CONFIGURATION"),
-            "",
-            neriloField(" Host", h.Hostname, inspectorWidth),
-            neriloField(" Port", neriloValue(h.Port, "22"), inspectorWidth),
-            neriloField(" User", neriloValue(h.User, "default"), inspectorWidth),
-            neriloField(" Auth", neriloAuth(h), inspectorWidth),
-            neriloField(" Group", neriloValue(strings.Join(h.Tags, ", "), "—"), inspectorWidth),
-            "",
-            dim.Render(" ACTIONS"),
-            lipgloss.NewStyle().Foreground(purple).Bold(true).Render(" ↵  Connect"),
-            " o  Open SFTP",
-            " e  Edit Connection",
-        )
-    } else {
-        detail = append(detail, dim.Render(" Select a host to inspect"))
-    }
-    inspector := lipgloss.NewStyle().Width(inspectorWidth-2).Height(availableHeight).
-        Padding(0, 1).Background(panelBg).
-        Border(lipgloss.NormalBorder(), false, false, false, true).
-        BorderForeground(border).Render(strings.Join(detail, "\n"))
-
-    columns := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, center, inspector)
-    help := lipgloss.NewStyle().Background(panelBg).Foreground(muted).
-        Width(m.width).Padding(0, 1).Render("↑↓ Navigate   Enter Connect   / Search   ? Help   Esc Back")
-    return lipgloss.JoinVertical(lipgloss.Left, strip, tabs, columns, help)
+    brand := neriloBlock(w, 2, p.chrome, "  "+p.title.Render("◈ NERILO")+"  "+p.dim.Render("/ remote workspace")+"      "+p.highlight.Render("CONNECTION MANAGER"))
+    nav := neriloBlock(w, 2, p.background,
+        "  "+p.key.Render("SSH")+"   "+p.dim.Render("t Serial   T Telnet   F FTP   W WebDAV   O S3   b Local Files")+
+        "\n  "+p.dim.Render("WORKSPACE / Connections"))
+    sidebar := m.neriloSidebar(sidebarWidth, bodyHeight, p)
+    list := m.neriloHostList(centerWidth, bodyHeight, p)
+    inspector := m.neriloInspector(inspectorWidth, bodyHeight, p)
+    footer := neriloBlock(w, 1, p.chrome, "  "+p.key.Render("↑↓ / jk")+" Move   "+p.key.Render("Enter")+" Connect   "+p.key.Render("/")+" Search   "+p.key.Render("o")+" SFTP   "+p.key.Render("f")+" Forward   "+p.key.Render("a")+" Add   "+p.key.Render("?")+" Help")
+    board := lipgloss.JoinVertical(lipgloss.Left, brand, nav, lipgloss.JoinHorizontal(lipgloss.Top, sidebar, list, inspector), footer)
+    return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, board,
+        lipgloss.WithWhitespaceBackground(p.background))
 }
 
-func neriloValue(value, fallback string) string {
-    if value == "" {
-        return fallback
+type neriloPalette struct {
+    background, chrome, sidebar, panel, selected lipgloss.Color
+    text, dim, title, highlight, key, success lipgloss.Style
+}
+
+func newNeriloPalette() neriloPalette {
+    return neriloPalette{
+        background: lipgloss.Color("#0B111B"),
+        chrome: lipgloss.Color("#141C2A"),
+        sidebar: lipgloss.Color("#101723"),
+        panel: lipgloss.Color("#172132"),
+        selected: lipgloss.Color("#263751"),
+        text: lipgloss.NewStyle().Foreground(lipgloss.Color("#C5D0E2")),
+        dim: lipgloss.NewStyle().Foreground(lipgloss.Color("#7E90A9")),
+        title: lipgloss.NewStyle().Foreground(lipgloss.Color("#91B7F8")).Bold(true),
+        highlight: lipgloss.NewStyle().Foreground(lipgloss.Color("#C2B2FF")),
+        key: lipgloss.NewStyle().Foreground(lipgloss.Color("#AFCBFF")).Bold(true),
+        success: lipgloss.NewStyle().Foreground(lipgloss.Color("#8ED8BB")),
     }
+}
+
+func neriloBlock(w, h int, bg lipgloss.Color, text string) string {
+    return lipgloss.NewStyle().Width(w).Height(h).Background(bg).MaxWidth(w).MaxHeight(h).Render(text)
+}
+
+func (m Model) neriloSidebar(w, h int, p neriloPalette) string {
+    rows := []string{
+        "", "  "+p.title.Render("◈  nerilo"), "  "+p.dim.Render("REMOTE HUB"),
+        "", "  "+p.dim.Render("WORKSPACE"),
+        "  "+p.key.Render("▸")+" "+p.text.Render("SSH Hosts"),
+        "    "+p.dim.Render("Serial"),
+        "    "+p.dim.Render("Telnet"),
+        "    "+p.dim.Render("FTP / WebDAV"),
+        "    "+p.dim.Render("S3 Storage"),
+        "    "+p.dim.Render("Local Files"),
+        "", "  "+p.dim.Render("LIBRARY"),
+        fmt.Sprintf("  Hosts       %d",len(m.hosts)),
+        "", "  "+p.dim.Render("QUICK ACTIONS"),
+        "  "+p.key.Render("a")+" Add host",
+        "  "+p.key.Render("w")+" Tag filter",
+        "  "+p.key.Render("p")+" Ping hosts",
+        "  "+p.key.Render("?")+" Help",
+    }
+    if m.selectedTag != "" {
+        rows = append(rows, "", "  "+p.highlight.Render(ansi.Truncate("#"+m.selectedTag,w-4,"…")))
+    }
+    return neriloBlock(w,h,p.sidebar,strings.Join(rows,"\n"))
+}
+
+func (m Model) neriloHostList(w,h int,p neriloPalette) string {
+    hosts:=m.filteredHosts
+    if hosts==nil {hosts=m.hosts}
+    cursor:=m.table.Cursor()
+    if cursor<0 {cursor=0}
+    if cursor>=len(hosts)&&len(hosts)>0 {cursor=len(hosts)-1}
+    inner:=w-5
+    rows:=[]string{
+        "", "  "+p.title.Render("Connections")+p.dim.Render(fmt.Sprintf("  %d hosts",len(hosts))),
+        "  "+p.dim.Render("Manage your remote environments"),
+        "", "  "+p.dim.Render("────────────────────────────────────"),
+    }
+    query:=m.searchInput.Value()
+    if query=="" {query="Find host, IP or tag…"}
+    query=ansi.Truncate(query,inner-5,"…")
+    if m.searchMode {
+        rows=append(rows,"  "+p.key.Render("⌕ ")+p.text.Render(query))
+    } else {
+        rows=append(rows,"  "+p.dim.Render("⌕ "+query)+"  "+p.key.Render("/"))
+    }
+    rows=append(rows,"","  "+p.dim.Render("ALL CONNECTIONS"),"")
+    perPage:=(h-len(rows)-4)/3
+    if perPage<1 {perPage=1}
+    start:=max(0,cursor-perPage+1)
+    if start+perPage>len(hosts) {start=max(0,len(hosts)-perPage)}
+    end:=min(len(hosts),start+perPage)
+    if len(hosts)==0 {
+        rows=append(rows,"  "+p.dim.Render("No matching connections"),"  "+p.dim.Render("Press a to add a host"))
+    }
+    for i:=start;i<end;i++ {
+        host:=hosts[i]
+        prefix:="  "
+        if m.selectedHosts[host.Name] {prefix="✓ "}
+        top:=prefix+"▣ "+ansi.Truncate(host.Name,inner-7,"…")
+        bottom:="     "+ansi.Truncate(neriloValue(host.Hostname,host.Name),inner-9,"…")
+        if len(host.Tags)>0 {bottom+="  "+ansi.Truncate("#"+strings.Join(host.Tags,","),16,"…")}
+        if i==cursor {
+            selected:=lipgloss.NewStyle().Foreground(lipgloss.Color("#E3EAFA")).Background(p.selected)
+            rows=append(rows,"  "+selected.Width(inner).Render("▸ "+ansi.Truncate(top,inner-2,"…")),
+                "  "+selected.Width(inner).Render(ansi.Truncate(bottom,inner,"…")))
+        } else {
+            rows=append(rows,"  "+p.text.Render(ansi.Truncate(top,inner,"…")),
+                "  "+p.dim.Render(ansi.Truncate(bottom,inner,"…")))
+        }
+        rows=append(rows,"")
+    }
+    if len(hosts)>perPage {
+        rows=append(rows,"  "+p.dim.Render(fmt.Sprintf("Showing %d–%d of %d",start+1,end,len(hosts))))
+    }
+    if m.showingError&&m.errorMessage!="" {
+        rows=append(rows,"  "+lipgloss.NewStyle().Foreground(lipgloss.Color("#F28B9D")).Render(ansi.Truncate(m.errorMessage,inner,"…")))
+    } else if m.statusActive() {
+        rows=append(rows,"  "+p.success.Render(ansi.Truncate(m.statusMessage,inner,"…")))
+    }
+    return neriloBlock(w,h,p.background,strings.Join(rows,"\n"))
+}
+
+func (m Model) neriloInspector(w,h int,p neriloPalette) string {
+    rows:=[]string{"","  "+p.dim.Render("CONNECTION DETAILS"),""}
+    hosts:=m.filteredHosts
+    if hosts==nil {hosts=m.hosts}
+    index:=m.table.Cursor()
+    if index<0 {index=0}
+    if index>=len(hosts) {index=len(hosts)-1}
+    if index<0 {
+        rows=append(rows,"  "+p.dim.Render("Select a connection"))
+        return neriloBlock(w,h,p.panel,strings.Join(rows,"\n"))
+    }
+    host:=hosts[index]
+    rows=append(rows,
+        "  "+p.title.Render("▣  "+ansi.Truncate(host.Name,w-8,"…")),
+        "  "+p.dim.Render(ansi.Truncate(neriloValue(host.User,"user")+"@"+neriloValue(host.Hostname,host.Name),w-5,"…")),
+        "", "  "+p.dim.Render("SSH CONFIGURATION"),"",
+        neriloField("Host",neriloValue(host.Hostname,host.Name),w),
+        neriloField("Port",neriloValue(host.Port,"22"),w),
+        neriloField("User",neriloValue(host.User,"default"),w),
+        neriloField("Auth",neriloAuth(host),w),
+        neriloField("Group",neriloValue(strings.Join(host.Tags,", "),"—"),w),
+        "", "  "+p.dim.Render("QUICK ACTIONS"),
+        "  "+p.key.Render("↵")+"  Connect via SSH",
+        "  "+p.key.Render("o")+"  Open SFTP explorer",
+        "  "+p.key.Render("f")+"  Port forwarding",
+        "  "+p.key.Render("e")+"  Edit connection",
+        "  "+p.key.Render("v")+"  Quick peek",
+    )
+    return neriloBlock(w,h,p.panel,strings.Join(rows,"\n"))
+}
+
+func neriloValue(value,fallback string) string {
+    if value=="" {return fallback}
     return value
 }
 
 func neriloAuth(host config.SSHHost) string {
-    if host.Identity != "" {
-        return "SSH Key"
-    }
-    if host.IdentityAgent != "" {
-        return "Agent"
-    }
+    if host.Identity!="" {return "SSH Key"}
+    if host.IdentityAgent!="" {return "Agent"}
     return "Default SSH"
 }
 
-func neriloField(label, value string, width int) string {
-    key := lipgloss.NewStyle().Foreground(lipgloss.Color("#8195B1")).Render(label)
-    maxValueWidth := width - lipgloss.Width(label) - 5
-    if maxValueWidth < 5 {
-        maxValueWidth = 5
-    }
-    val := ansi.Truncate(value, maxValueWidth, "…")
-    gap := width - 3 - lipgloss.Width(label) - lipgloss.Width(val)
-    if gap < 1 {
-        gap = 1
-    }
-    return key + strings.Repeat(" ", gap) + val
+func neriloField(label,value string,width int) string {
+    key:=lipgloss.NewStyle().Foreground(lipgloss.Color("#8195B1")).Render("  "+label)
+    maxValueWidth:=max(5,width-lipgloss.Width(label)-8)
+    val:=ansi.Truncate(value,maxValueWidth,"…")
+    gap:=max(1,width-4-lipgloss.Width(label)-lipgloss.Width(val))
+    return key+strings.Repeat(" ",gap)+val
 }
