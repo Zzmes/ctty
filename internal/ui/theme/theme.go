@@ -63,6 +63,21 @@ var (
 		FormHelp:   lipgloss.Color("#626262"),
 	}
 
+	// NeriloTheme is the Slate Blue design system used by the new dashboard.
+	NeriloTheme = Theme{
+		ID:         "nerilo",
+		Name:       "NERILO · Slate Blue",
+		Primary:    lipgloss.Color("#91B7F8"),
+		Secondary:  lipgloss.Color("#7E90A9"),
+		Error:      lipgloss.Color("#F28B9D"),
+		Success:    lipgloss.Color("#8ED8BB"),
+		Warning:    lipgloss.Color("#F0C48E"),
+		SelectedFg: lipgloss.Color("#E3EAFA"),
+		SelectedBg: lipgloss.Color("#263751"),
+		HelpText:   lipgloss.Color("#97A8C0"),
+		FormHelp:   lipgloss.Color("#8195B1"),
+	}
+
 	CatppuccinTheme = Theme{
 		ID:         "catppuccin",
 		Name:       "Catppuccin Mocha",
@@ -141,6 +156,7 @@ var allThemes = []Theme{
 	NordTheme,
 	CharmTheme,
 	ANSITheme,
+	NeriloTheme,
 }
 
 // AllThemes returns a slice of all registered themes
